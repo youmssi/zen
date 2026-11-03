@@ -51,11 +51,13 @@ impl LoaderConfig {
         let loader = MemoryLoader::default();
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index)?;
-            if !entry.is_file() || !entry.name().ends_with(".json") {
+            if !entry.is_file() {
                 continue;
             }
-
-            let key = entry.name().to_string();
+            let key = entry.name()?.into_owned();
+            if !key.ends_with(".json") {
+                continue;
+            }
             let mut buffer = Vec::with_capacity(entry.size() as usize);
             entry.read_to_end(&mut buffer)?;
             let content: DecisionContent = serde_json::from_slice(&buffer)?;
@@ -107,6 +109,10 @@ mod tests {
                 .compression_method(zip::CompressionMethod::Deflated);
             writer.start_file("graph.json", options).unwrap();
             writer.write_all(GRAPH_JSON.as_bytes()).unwrap();
+            writer.start_file("folder/règle.json", options).unwrap();
+            writer.write_all(GRAPH_JSON.as_bytes()).unwrap();
+            writer.start_file("README.txt", options).unwrap();
+            writer.write_all(b"Not a decision graph").unwrap();
             writer.finish().unwrap();
         }
 
@@ -117,6 +123,17 @@ mod tests {
         .unwrap();
 
         assert!(loader.load("graph.json").await.is_ok());
+        assert!(loader.load("folder/règle.json").await.is_ok());
+        assert!(loader.load("README.txt").await.is_err());
         assert!(loader.load("missing.json").await.is_err());
+    }
+
+    #[test]
+    fn zip_config_rejects_a_malformed_archive() {
+        assert!(LoaderConfig::Zip {
+            bytes: b"not an archive".to_vec(),
+        }
+        .into_loader()
+        .is_err());
     }
 }
