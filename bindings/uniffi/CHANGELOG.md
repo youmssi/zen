@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.1.6](https://github.com/gorules/zen/compare/uniffi-v2.1.5...uniffi-v2.1.6) (2026-10-21)
+
+## [2.1.5](https://github.com/gorules/zen/compare/uniffi-v2.1.4...uniffi-v2.1.5) (2026-10-20)
+
+## [2.1.4](https://github.com/gorules/zen/compare/uniffi-v2.1.3...uniffi-v2.1.4) (2026-10-13)
+
+## [2.1.3](https://github.com/gorules/zen/compare/uniffi-v2.1.2...uniffi-v2.1.3) (2026-10-09)
+
+## [2.1.2](https://github.com/gorules/zen/compare/uniffi-v2.1.1...uniffi-v2.1.2) (2026-10-02)
+
+## [2.1.1](https://github.com/gorules/zen/compare/uniffi-v2.1.0...uniffi-v2.1.1) (2026-09-29)
+
+## [2.1.0](https://github.com/gorules/zen/compare/uniffi-v2.0.2...uniffi-v2.1.0) (2026-09-29)
+
+
+### Miscellaneous
+
+* **uniffi:** align with zen-engine 2.1.0
+
 ## [2.0.2](https://github.com/gorules/zen/compare/uniffi-v2.0.1...uniffi-v2.0.2) (2026-08-24)
 
 

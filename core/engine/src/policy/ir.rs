@@ -221,7 +221,8 @@ impl DataModelIr {
         visited: &mut HashSet<Arc<str>>,
     ) -> VariableType {
         let inner = match &prop.kind {
-            PropertyTypeIr::String | PropertyTypeIr::Date => VariableType::String,
+            PropertyTypeIr::String => VariableType::String,
+            PropertyTypeIr::Date => VariableType::Date,
             PropertyTypeIr::Enum(values) => VariableType::Enum(None, enum_values_to_rc(values)),
             PropertyTypeIr::Number => VariableType::Number,
             PropertyTypeIr::Boolean => VariableType::Bool,
@@ -421,13 +422,13 @@ impl DataModelIr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DictionaryIr {
     pub name: Arc<str>,
     pub entries: Vec<DictionaryEntry>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DictionaryEntry {
     pub value: Arc<str>,
     pub label: Arc<str>,
@@ -550,7 +551,7 @@ impl std::fmt::Display for PropertyTypeIr {
             }
             PropertyTypeIr::Number => f.write_str("number"),
             PropertyTypeIr::Boolean => f.write_str("bool"),
-            PropertyTypeIr::Date => f.write_str("date (string)"),
+            PropertyTypeIr::Date => f.write_str("date"),
             PropertyTypeIr::Reference { target } => {
                 write!(f, "reference id (string → {target})")
             }

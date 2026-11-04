@@ -403,8 +403,8 @@ content = '''
 }
 '''
 no_errors = true
-hint_codes = ["RedundantTableRow", "NonDiscriminatingColumn", "PreferDictionary"]
-hint_count = 3
+hint_codes = ["NonDiscriminatingColumn", "PreferDictionary", "CompressibleTable", "DuplicateRule"]
+hint_count = 4
 
 # Multi-policy
 
@@ -500,8 +500,8 @@ content = '''
 }
 '''
 no_errors = true
-hint_codes = ["PreferDictionary"]
-hint_count = 1
+hint_codes = ["PreferDictionary", "CompressibleTable"]
+hint_count = 2
 
 [[test]]
 name = "values yields union of field types"
@@ -546,6 +546,54 @@ name = "duplicate writer detected"
 policies = ["duplicate_writer.json"]
 policy = "duplicate_writer.json"
 error_codes = ["DuplicateWriter"]
+
+[[test]]
+name = "importer does not repeat errors internal to an imported policy"
+policies = ["imports_duplicate_writer.json", "duplicate_writer.json"]
+policy = "imports_duplicate_writer.json"
+no_errors = true
+
+[[test]]
+name = "conflict created by combining imports is reported on the importer"
+policies = ["composed_entry.json", "composed_left.json", "composed_right.json"]
+policy = "composed_entry.json"
+error_codes = ["DuplicateWriter"]
+
+[[test]]
+name = "combined imports are valid on their own"
+policies = ["composed_entry.json", "composed_left.json", "composed_right.json"]
+policy = "composed_left.json"
+no_errors = true
+
+[[test]]
+name = "duplicate writer across an import chain is reported by the middle policy"
+policies = ["chain_entry.json", "chain_mid.json", "chain_base.json"]
+policy = "chain_mid.json"
+error_codes = ["DuplicateWriter"]
+
+[[test]]
+name = "duplicate writer across an import chain is not repeated on the entry"
+policies = ["chain_entry.json", "chain_mid.json", "chain_base.json"]
+policy = "chain_entry.json"
+no_errors = true
+
+[[test]]
+name = "cycle across an import chain is reported by the middle policy"
+policies = ["cycle_entry.json", "cycle_mid.json", "cycle_base.json"]
+policy = "cycle_mid.json"
+error_codes = ["CyclicDependency"]
+
+[[test]]
+name = "cycle across an import chain is not repeated on the entry"
+policies = ["cycle_entry.json", "cycle_mid.json", "cycle_base.json"]
+policy = "cycle_entry.json"
+no_errors = true
+
+[[test]]
+name = "cycle created by combining imports is reported on the importer"
+policies = ["cycle_composed.json", "cycle_left.json", "cycle_right.json"]
+policy = "cycle_composed.json"
+error_codes = ["CyclicDependency"]
 
 # Inline-content tests — self-contained fixtures for focused type-system
 # behaviors (any-escape detection, built-in call-type inference, etc.).
@@ -674,7 +722,8 @@ content = '''
 }
 '''
 no_errors = true
-hint_codes = ["RedundantTableRow"]
+warning_codes = ["UnreachableRule"]
+hint_codes = ["MissingCases"]
 hint_count = 1
 
 [[test]]
@@ -1110,8 +1159,8 @@ content = '''
 }
 '''
 no_errors = true
-hint_codes = ["NonDiscriminatingColumn"]
-hint_count = 1
+hint_codes = ["NonDiscriminatingColumn", "CompressibleTable"]
+hint_count = 2
 
 [[test]]
 name = "block writing to multiple entities is mixed scope"

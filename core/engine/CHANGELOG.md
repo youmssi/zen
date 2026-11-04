@@ -1,5 +1,126 @@
 # Changelog
 
+## [2.1.6](https://github.com/gorules/zen/compare/zen-engine-v2.1.5...zen-engine-v2.1.6) (2026-10-21)
+
+
+### Bug Fixes
+
+* **engine:** drop rows shadowed by an earlier row when compressing ([#551](https://github.com/gorules/zen/issues/551)) ([f2aa773](https://github.com/gorules/zen/commit/f2aa773c7266032cb02b479a3cdd8a4a8213d756))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * zen-types bumped from 2.1.5 to 2.1.6
+    * zen-expression bumped from 2.1.5 to 2.1.6
+    * zen-tmpl bumped from 2.1.5 to 2.1.6
+
+## [2.1.5](https://github.com/gorules/zen/compare/zen-engine-v2.1.4...zen-engine-v2.1.5) (2026-10-20)
+
+
+### Bug Fixes
+
+* **engine:** bound table gap analysis memory, analyse expression columns ([#549](https://github.com/gorules/zen/issues/549)) ([b764040](https://github.com/gorules/zen/commit/b764040ecfc50b2b1e0bc96c087a6f8532c67e56))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * zen-types bumped from 2.1.4 to 2.1.5
+    * zen-expression bumped from 2.1.4 to 2.1.5
+    * zen-tmpl bumped from 2.1.4 to 2.1.5
+
+## [2.1.4](https://github.com/gorules/zen/compare/zen-engine-v2.1.3...zen-engine-v2.1.4) (2026-10-13)
+
+
+### Bug Fixes
+
+* threadless wasm ([#543](https://github.com/gorules/zen/issues/543)) ([c8692c4](https://github.com/gorules/zen/commit/c8692c401dd8adf01e2bad44f889349b22a351ec))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * zen-types bumped from 2.1.3 to 2.1.4
+    * zen-expression bumped from 2.1.3 to 2.1.4
+    * zen-tmpl bumped from 2.1.3 to 2.1.4
+
+## [2.1.3](https://github.com/gorules/zen/compare/zen-engine-v2.1.2...zen-engine-v2.1.3) (2026-10-09)
+
+
+### Bug Fixes
+
+* rewrite import and decision node paths when documents move ([#539](https://github.com/gorules/zen/issues/539)) ([f887b7b](https://github.com/gorules/zen/commit/f887b7bad4e7513b00ec3dcafec009e0143383eb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * zen-types bumped from 2.1.2 to 2.1.3
+    * zen-expression bumped from 2.1.2 to 2.1.3
+    * zen-tmpl bumped from 2.1.2 to 2.1.3
+
+## [2.1.2](https://github.com/gorules/zen/compare/zen-engine-v2.1.1...zen-engine-v2.1.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* decision table verification and diagnostic ([#537](https://github.com/gorules/zen/issues/537)) ([20d88e3](https://github.com/gorules/zen/commit/20d88e398d872adb8ab450a3ee802910f8a02cf3))
+* prevent self-referencing $ in graph expression nodes from overflowing the stack ([#535](https://github.com/gorules/zen/issues/535)) ([d076cab](https://github.com/gorules/zen/commit/d076cab213fc9ada31e5e4c76b96cb85e90fd599))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * zen-types bumped from 2.1.1 to 2.1.2
+    * zen-expression bumped from 2.1.1 to 2.1.2
+    * zen-tmpl bumped from 2.1.1 to 2.1.2
+
+## [2.1.1](https://github.com/gorules/zen/compare/zen-engine-v2.1.0...zen-engine-v2.1.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* type hover on graph decision table output columns ([#532](https://github.com/gorules/zen/issues/532)) ([35d3db6](https://github.com/gorules/zen/commit/35d3db620a04e75c26e3b84cd65eeca10579c3ef))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * zen-types bumped from 2.1.0 to 2.1.1
+    * zen-expression bumped from 2.1.0 to 2.1.1
+    * zen-tmpl bumped from 2.1.0 to 2.1.1
+
+## [2.1.0](https://github.com/gorules/zen/compare/zen-engine-v2.0.1...zen-engine-v2.1.0) (2026-09-29)
+
+
+### Features
+
+* date input ([#529](https://github.com/gorules/zen/issues/529)) ([39916c9](https://github.com/gorules/zen/commit/39916c9d18bce435fb40660e2bdf5ff768b6028e))
+* implement slots instead of natural language ([#527](https://github.com/gorules/zen/issues/527)) ([ffdfd80](https://github.com/gorules/zen/commit/ffdfd807d1ad6e6be42854fbaaf429c2871fe90a))
+
+
+### Bug Fixes
+
+* return errors instead of panicking in memory loader and v1 functions ([#524](https://github.com/gorules/zen/issues/524)) ([e095189](https://github.com/gorules/zen/commit/e095189dd6bca2c2afdb959a3d99f9549d1d296c))
+* scope policy evaluation to the import closure ([#525](https://github.com/gorules/zen/issues/525)) ([a7157f3](https://github.com/gorules/zen/commit/a7157f344802c489e3b5ee9b1deda331d6d790e1))
+* tolerate null inputs and enforce required policy inputs ([#528](https://github.com/gorules/zen/issues/528)) ([4aba11e](https://github.com/gorules/zen/commit/4aba11edd3516e8a65a240ea4d43a8b3bd377ae5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * zen-types bumped from 2.0.1 to 2.1.0
+    * zen-expression bumped from 2.0.1 to 2.1.0
+    * zen-tmpl bumped from 2.0.1 to 2.1.0
+
 ## [2.0.1](https://github.com/gorules/zen/compare/zen-engine-v2.0.0...zen-engine-v2.0.1) (2026-08-22)
 
 

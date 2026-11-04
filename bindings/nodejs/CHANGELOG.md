@@ -1,5 +1,70 @@
 # Changelog
 
+## [2.1.9](https://github.com/gorules/zen/compare/nodejs-v2.1.8...nodejs-v2.1.9) (2026-10-21)
+
+## [2.1.8](https://github.com/gorules/zen/compare/nodejs-v2.1.7...nodejs-v2.1.8) (2026-10-20)
+
+## [2.1.7](https://github.com/gorules/zen/compare/nodejs-v2.1.6...nodejs-v2.1.7) (2026-10-13)
+
+
+### Bug Fixes
+
+* **nodejs:** accept ZenDecisionContent returned from the loader ([#547](https://github.com/gorules/zen/issues/547)) ([96af373](https://github.com/gorules/zen/commit/96af373b626a779aacd43f7ed75e56f44ba469e4))
+
+## [2.1.6](https://github.com/gorules/zen/compare/nodejs-v2.1.5...nodejs-v2.1.6) (2026-10-13)
+
+
+### Bug Fixes
+
+* nodejs wasm root package ([#545](https://github.com/gorules/zen/issues/545)) ([73c8fda](https://github.com/gorules/zen/commit/73c8fda788dd20eb2f9f914b98e71e1d11510303))
+
+## [2.1.5](https://github.com/gorules/zen/compare/nodejs-v2.1.4...nodejs-v2.1.5) (2026-10-13)
+
+
+### Bug Fixes
+
+* threadless wasm ([#543](https://github.com/gorules/zen/issues/543)) ([c8692c4](https://github.com/gorules/zen/commit/c8692c401dd8adf01e2bad44f889349b22a351ec))
+
+## [2.1.4](https://github.com/gorules/zen/compare/nodejs-v2.1.3...nodejs-v2.1.4) (2026-10-09)
+
+
+### Bug Fixes
+
+* generate nodejs index.d.ts at build time instead of committing it ([#541](https://github.com/gorules/zen/issues/541)) ([dca7cac](https://github.com/gorules/zen/commit/dca7cac7e7029bc9d10a1c29eca7fe136172b27b))
+
+## [2.1.3](https://github.com/gorules/zen/compare/nodejs-v2.1.2...nodejs-v2.1.3) (2026-10-09)
+
+
+### Bug Fixes
+
+* rewrite import and decision node paths when documents move ([#539](https://github.com/gorules/zen/issues/539)) ([f887b7b](https://github.com/gorules/zen/commit/f887b7bad4e7513b00ec3dcafec009e0143383eb))
+
+## [2.1.2](https://github.com/gorules/zen/compare/nodejs-v2.1.1...nodejs-v2.1.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* decision table verification and diagnostic ([#537](https://github.com/gorules/zen/issues/537)) ([20d88e3](https://github.com/gorules/zen/commit/20d88e398d872adb8ab450a3ee802910f8a02cf3))
+
+## [2.1.1](https://github.com/gorules/zen/compare/nodejs-v2.1.0...nodejs-v2.1.1) (2026-09-29)
+
+## [2.1.0](https://github.com/gorules/zen/compare/nodejs-v2.0.2...nodejs-v2.1.0) (2026-09-29)
+
+
+### Features
+
+* implement slots instead of natural language ([#527](https://github.com/gorules/zen/issues/527)) ([ffdfd80](https://github.com/gorules/zen/commit/ffdfd807d1ad6e6be42854fbaaf429c2871fe90a))
+
+
+### Bug Fixes
+
+* tolerate null inputs and enforce required policy inputs ([#528](https://github.com/gorules/zen/issues/528)) ([4aba11e](https://github.com/gorules/zen/commit/4aba11edd3516e8a65a240ea4d43a8b3bd377ae5))
+
+
+### Miscellaneous
+
+* **nodejs:** align with zen-engine 2.1.0
+
 ## [2.0.2](https://github.com/gorules/zen/compare/nodejs-v2.0.1...nodejs-v2.0.2) (2026-08-24)
 
 

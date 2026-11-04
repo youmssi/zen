@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.1.6](https://github.com/gorules/zen/compare/python-v2.1.5...python-v2.1.6) (2026-10-21)
+
+## [2.1.5](https://github.com/gorules/zen/compare/python-v2.1.4...python-v2.1.5) (2026-10-20)
+
+## [2.1.4](https://github.com/gorules/zen/compare/python-v2.1.3...python-v2.1.4) (2026-10-13)
+
+## [2.1.3](https://github.com/gorules/zen/compare/python-v2.1.2...python-v2.1.3) (2026-10-09)
+
+## [2.1.2](https://github.com/gorules/zen/compare/python-v2.1.1...python-v2.1.2) (2026-10-02)
+
+## [2.1.1](https://github.com/gorules/zen/compare/python-v2.1.0...python-v2.1.1) (2026-09-29)
+
+## [2.1.0](https://github.com/gorules/zen/compare/python-v2.0.2...python-v2.1.0) (2026-09-29)
+
+
+### Miscellaneous
+
+* **python:** align with zen-engine 2.1.0
+
 ## [2.0.2](https://github.com/gorules/zen/compare/python-v2.0.1...python-v2.0.2) (2026-08-24)
 
 

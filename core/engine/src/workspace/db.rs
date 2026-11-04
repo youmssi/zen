@@ -25,10 +25,12 @@ use crate::policy::queries::scope::{
     VariableTypeScope,
 };
 use crate::policy::raw::PolicyDocument;
+use crate::workspace::document_dependencies::DependencyIndex;
 use crate::workspace::graph::function::{
     FunctionKey, FunctionResolutionRequest, FunctionTypeResolver, ResolvedFunction,
 };
 use crate::workspace::graph::GraphAnalysis;
+use crate::workspace::reads::ReadView;
 use crate::workspace::types::{BlockRef, Diagnostic, ExpressionKind, InstanceTarget};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -39,7 +41,22 @@ pub enum AnalysisPass {
 
 pub(crate) struct GraphDeps {
     docs: Vec<(Arc<str>, Option<Arc<DecisionContent>>)>,
+    views: Vec<(Arc<str>, ReadView)>,
     functions: Vec<(FunctionKey, u64)>,
+}
+
+#[derive(Default)]
+pub(crate) struct ChangeLog {
+    pending: Vec<Arc<str>>,
+    settling: bool,
+    sequence: u64,
+    marked: HashMap<Arc<str>, u64>,
+}
+
+#[derive(Default)]
+pub(crate) struct DepFrame {
+    docs: HashSet<Arc<str>>,
+    views: Vec<(Arc<str>, ReadView)>,
 }
 
 #[derive(Default)]
@@ -139,7 +156,7 @@ pub struct Snapshot {
     pub(crate) shallow: Arc<ShallowAnalyses>,
     pub(crate) components: Vec<Vec<Arc<str>>>,
     pub(crate) policy_to_component: HashMap<Arc<str>, usize>,
-    pub(crate) units: RefCell<HashMap<usize, Arc<Unit>>>,
+    pub(crate) units: RefCell<HashMap<Arc<str>, Arc<Unit>>>,
     pub(crate) policy_diagnostics: RefCell<HashMap<Arc<str>, Arc<Vec<Diagnostic>>>>,
     pub(crate) eval_artifacts: RefCell<HashMap<Arc<str>, Arc<EvalArtifact>>>,
     pub(crate) path_set: OnceCell<Arc<HashSet<Arc<str>>>>,
@@ -186,13 +203,16 @@ pub struct Db {
     intellisense: SharedIntelliSense,
     graph_intellisense: SharedIntelliSense,
     pub(crate) graph_stack: RefCell<Vec<Arc<str>>>,
-    graph_dep_frames: RefCell<Vec<HashSet<Arc<str>>>>,
+    graph_dep_frames: RefCell<Vec<DepFrame>>,
+    dependencies: DependencyIndex,
+    changes: RefCell<ChangeLog>,
     graph_fn_frames: RefCell<Vec<HashMap<FunctionKey, u64>>>,
     function_types: RefCell<HashMap<FunctionKey, ResolvedFunction>>,
     function_requests: RefCell<Vec<FunctionResolutionRequest>>,
     function_requested: RefCell<HashSet<FunctionKey>>,
     function_resolver: RefCell<Option<Box<FunctionTypeResolver>>>,
-    scope_roots: RefCell<Vec<VariableType>>,
+    scope_roots: Rc<RefCell<Vec<VariableType>>>,
+    pub(crate) labels: crate::workspace::slot::LabelCache,
 }
 
 impl Drop for Db {
@@ -215,16 +235,21 @@ impl Db {
             graph_intellisense: Rc::new(RefCell::new(IntelliSense::new().with_strict(true))),
             graph_stack: RefCell::new(Vec::new()),
             graph_dep_frames: RefCell::new(Vec::new()),
+            dependencies: DependencyIndex::default(),
+            changes: RefCell::new(ChangeLog::default()),
             graph_fn_frames: RefCell::new(Vec::new()),
             function_types: RefCell::new(HashMap::default()),
             function_requests: RefCell::new(Vec::new()),
             function_requested: RefCell::new(HashSet::default()),
             function_resolver: RefCell::new(None),
-            scope_roots: RefCell::new(Vec::new()),
+            scope_roots: Rc::new(RefCell::new(Vec::new())),
+            labels: Default::default(),
         }
     }
 
     pub fn set_document(&mut self, path: Arc<str>, doc: Arc<DecisionContent>) {
+        self.dependencies.set(path.clone(), &doc);
+        self.changes.borrow_mut().pending.push(path.clone());
         self.inputs.borrow_mut().documents.insert(path, doc);
         self.invalidate_snapshot();
     }
@@ -234,11 +259,74 @@ impl Db {
     }
 
     pub fn remove_document(&mut self, path: &str) -> bool {
+        self.dependencies.remove(path);
+        self.changes.borrow_mut().pending.push(Arc::from(path));
         let existed = self.inputs.borrow_mut().documents.remove(path).is_some();
         if existed {
             self.invalidate_snapshot();
         }
         existed
+    }
+
+    pub(crate) fn frozen_views(&self) -> HashMap<(Arc<str>, Arc<str>), Vec<ReadView>> {
+        let cache = self.cache.graphs.borrow();
+        let inputs = self.inputs.borrow();
+        let mut out: HashMap<(Arc<str>, Arc<str>), Vec<ReadView>> = HashMap::default();
+        for (user, (deps, _)) in cache.iter() {
+            let current = deps.docs.iter().any(|(doc, stamp)| {
+                doc == user
+                    && matches!(
+                        (stamp, inputs.documents.get(user)),
+                        (Some(stamp), Some(now)) if Arc::ptr_eq(stamp, now)
+                    )
+            });
+            if !current {
+                continue;
+            }
+            for (dependency, view) in &deps.views {
+                out.entry((user.clone(), dependency.clone()))
+                    .or_default()
+                    .push(view.clone());
+            }
+        }
+        out
+    }
+
+    pub(crate) fn settle(&self) {
+        if self.changes.borrow().settling || self.changes.borrow().pending.is_empty() {
+            return;
+        }
+        let pending = {
+            let mut changes = self.changes.borrow_mut();
+            changes.settling = true;
+            std::mem::take(&mut changes.pending)
+        };
+        let affected = self.walk(&pending);
+        let mut changes = self.changes.borrow_mut();
+        changes.settling = false;
+        changes.sequence += 1;
+        let sequence = changes.sequence;
+        for path in affected {
+            changes.marked.insert(path, sequence);
+        }
+    }
+
+    pub(crate) fn changes_since(&self, cursor: u64) -> (u64, Vec<Arc<str>>) {
+        self.snapshot();
+        self.settle();
+        let changes = self.changes.borrow();
+        let mut paths: Vec<Arc<str>> = changes
+            .marked
+            .iter()
+            .filter(|(_, &sequence)| sequence > cursor)
+            .map(|(path, _)| path.clone())
+            .collect();
+        paths.sort();
+        (changes.sequence, paths)
+    }
+
+    pub(crate) fn document_dependencies(&self) -> &DependencyIndex {
+        &self.dependencies
     }
 
     pub fn document_paths(&self) -> Vec<Arc<str>> {
@@ -341,33 +429,29 @@ impl Db {
         }
     }
 
-    pub(crate) fn graph_dep_record(&self, path: &Arc<str>) {
+    pub(crate) fn graph_dep_record_view(&self, path: &Arc<str>, view: ReadView) {
         if let Some(frame) = self.graph_dep_frames.borrow_mut().last_mut() {
-            frame.insert(path.clone());
-        }
-    }
-
-    pub(crate) fn graph_dep_record_many(&self, paths: impl IntoIterator<Item = Arc<str>>) {
-        if let Some(frame) = self.graph_dep_frames.borrow_mut().last_mut() {
-            frame.extend(paths);
+            if !frame.views.iter().any(|(p, v)| p == path && *v == view) {
+                frame.views.push((path.clone(), view));
+            }
         }
     }
 
     pub(crate) fn graph_dep_frame_push(&self, path: &Arc<str>) {
-        let mut frame = HashSet::default();
-        frame.insert(path.clone());
+        let mut frame = DepFrame::default();
+        frame.docs.insert(path.clone());
         self.graph_dep_frames.borrow_mut().push(frame);
         self.graph_fn_frames.borrow_mut().push(HashMap::default());
     }
 
-    pub(crate) fn graph_dep_frame_pop(&self) -> (HashSet<Arc<str>>, HashMap<FunctionKey, u64>) {
-        let docs = self.graph_dep_frames.borrow_mut().pop().unwrap_or_default();
+    pub(crate) fn graph_dep_frame_pop(&self) -> (DepFrame, HashMap<FunctionKey, u64>) {
+        let frame = self.graph_dep_frames.borrow_mut().pop().unwrap_or_default();
         let functions = self.graph_fn_frames.borrow_mut().pop().unwrap_or_default();
-        (docs, functions)
+        (frame, functions)
     }
 
     pub(crate) fn cached_graph_analysis(&self, path: &Arc<str>) -> Option<Arc<GraphAnalysis>> {
-        let (dep_paths, fn_stamps, analysis) = {
+        let (views, fn_stamps, analysis) = {
             let cache = self.cache.graphs.borrow();
             let (deps, analysis) = cache.get(path)?;
             let inputs = self.inputs.borrow();
@@ -388,10 +472,14 @@ impl Db {
             if !functions_valid {
                 return None;
             }
-            let dep_paths: Vec<Arc<str>> = deps.docs.iter().map(|(p, _)| p.clone()).collect();
-            (dep_paths, deps.functions.clone(), analysis.clone())
+            (deps.views.clone(), deps.functions.clone(), analysis.clone())
         };
-        self.graph_dep_record_many(dep_paths);
+        self.graph_stack.borrow_mut().push(path.clone());
+        let valid = views.iter().all(|(dep, view)| self.view_holds(dep, view));
+        self.graph_stack.borrow_mut().pop();
+        if !valid {
+            return None;
+        }
         for (key, state) in fn_stamps {
             self.graph_fn_record(key, state);
         }
@@ -401,13 +489,13 @@ impl Db {
     pub(crate) fn store_graph_analysis(
         &self,
         path: &Arc<str>,
-        docs: HashSet<Arc<str>>,
+        frame: DepFrame,
         functions: HashMap<FunctionKey, u64>,
         analysis: Arc<GraphAnalysis>,
     ) {
         let deps = {
             let inputs = self.inputs.borrow();
-            let mut sorted: Vec<Arc<str>> = docs.into_iter().collect();
+            let mut sorted: Vec<Arc<str>> = frame.docs.into_iter().collect();
             sorted.sort();
             let docs = sorted
                 .into_iter()
@@ -418,7 +506,11 @@ impl Db {
                 .collect();
             let mut functions: Vec<(FunctionKey, u64)> = functions.into_iter().collect();
             functions.sort_unstable();
-            GraphDeps { docs, functions }
+            GraphDeps {
+                docs,
+                views: frame.views,
+                functions,
+            }
         };
         self.cache
             .graphs
@@ -427,6 +519,10 @@ impl Db {
     }
 
     pub fn snapshot(&self) -> Arc<Snapshot> {
+        if let Some(s) = self.snapshot.borrow().clone() {
+            return s;
+        }
+        self.settle();
         if let Some(s) = self.snapshot.borrow().clone() {
             return s;
         }
@@ -448,23 +544,31 @@ impl Db {
 
     pub fn unit(&self, policy: &str) -> Arc<Unit> {
         let snap = self.snapshot();
-        let Some(&idx) = snap.policy_to_component.get(policy) else {
-            return self.cache.unit_or_compute(&[], &[], || {
-                Snapshot::compute_unit(&[], &snap.all_parsed, &snap.shallow)
-            });
-        };
-        if let Some(u) = snap.units.borrow().get(&idx).cloned() {
+        if let Some(u) = snap.units.borrow().get(policy).cloned() {
             return u;
         }
-        let members = &snap.components[idx];
+        let mut seen = HashSet::default();
+        let mut stack = vec![Arc::<str>::from(policy)];
+        while let Some(path) = stack.pop() {
+            let Some(parsed) = snap.all_parsed.get(&path) else {
+                continue;
+            };
+            if seen.insert(path) {
+                stack.extend(parsed.policy.imports().iter().cloned());
+            }
+        }
+        let mut members: Vec<_> = seen.into_iter().collect();
+        members.sort();
         let parsed: Vec<Arc<ParsedPolicy>> = members
             .iter()
             .filter_map(|m| snap.all_parsed.get(m).cloned())
             .collect();
-        let unit = self.cache.unit_or_compute(members, &parsed, || {
-            Snapshot::compute_unit(members, &snap.all_parsed, &snap.shallow)
+        let unit = self.cache.unit_or_compute(&members, &parsed, || {
+            Snapshot::compute_unit(&members, &snap.all_parsed, &snap.shallow)
         });
-        snap.units.borrow_mut().insert(idx, unit.clone());
+        snap.units
+            .borrow_mut()
+            .insert(Arc::from(policy), unit.clone());
         unit
     }
 
@@ -515,30 +619,34 @@ impl Db {
 
     pub(crate) fn enriched_of_unit(&self, unit: &Unit) -> Arc<EnrichedState> {
         unit.enriched_once
-            .get_or_init(|| {
-                let snap = self.snapshot();
-                let subset: HashMap<Arc<str>, Arc<ParsedPolicy>> = unit
-                    .members
-                    .iter()
-                    .filter_map(|m| snap.all_parsed.get_key_value(m))
-                    .map(|(p, v)| (p.clone(), v.clone()))
-                    .collect();
-                let base_scope = Snapshot::compute_base_scope(&subset, &unit.entity_sources);
-                self.scope_roots
-                    .borrow_mut()
-                    .push(base_scope.shallow_clone());
-                Arc::new(Snapshot::compute_enriched(
-                    &base_scope,
-                    &unit.dep_graph,
-                    &unit.execution_order,
-                    &snap.rule_by_ref,
-                    &snap.shallow,
-                    &unit.members,
-                    &self.intellisense,
-                    Rc::new(unit.dictionary_types()),
-                ))
-            })
+            .get_or_init(|| Arc::new(self.compute_unit_enriched(unit)))
             .clone()
+    }
+
+    pub(crate) fn compute_unit_enriched(&self, unit: &Unit) -> EnrichedState {
+        let snap = self.snapshot();
+        let subset: HashMap<Arc<str>, Arc<ParsedPolicy>> = unit
+            .members
+            .iter()
+            .filter_map(|m| snap.all_parsed.get_key_value(m))
+            .map(|(p, v)| (p.clone(), v.clone()))
+            .collect();
+        let base_scope = Snapshot::compute_base_scope(&subset, &unit.entity_sources);
+        self.scope_roots
+            .borrow_mut()
+            .push(base_scope.shallow_clone());
+        Snapshot::compute_enriched(
+            &base_scope,
+            self.scope_roots.clone(),
+            &unit.dep_graph,
+            &unit.execution_order,
+            &snap.rule_by_ref,
+            &snap.shallow,
+            &unit.members,
+            &self.intellisense,
+            Rc::new(unit.dictionary_types()),
+            Rc::new(unit.data_model_paths.clone()),
+        )
     }
 
     pub(crate) fn opcode_cache_of_unit(&self, unit: &Unit) -> Arc<OpcodeCache> {
@@ -646,16 +754,20 @@ impl Db {
                     let mut out = Vec::new();
                     ReadFlattener::extend_from_deps(&analysis.reads, &None, &mut out);
                     out.into_iter()
-                        .filter_map(|rd| {
-                            if rd.unresolved {
-                                None
-                            } else if rd.via_alias {
-                                entity_form
-                                    .rewrite(rd.path.as_ref())
-                                    .map(Arc::from)
-                                    .or(Some(rd.path))
-                            } else {
-                                Some(rd.path)
+                        .filter(|rd| !rd.unresolved)
+                        .flat_map(|rd| {
+                            let entity = entity_form
+                                .rewrite(rd.path.as_ref())
+                                .or_else(|| {
+                                    unit.entity_graph
+                                        .instance_form(rd.path.as_ref(), &entity_form)
+                                        .map(|(_, entity)| entity)
+                                })
+                                .map(Arc::from);
+                            match (rd.via_alias, entity) {
+                                (true, Some(entity)) => vec![entity],
+                                (false, Some(entity)) => vec![rd.path, entity],
+                                (_, None) => vec![rd.path],
                             }
                         })
                         .collect()
@@ -767,11 +879,9 @@ impl Snapshot {
 
         let entity_sources = Self::compute_entity_sources(&all_parsed);
         let base_scope = Self::compute_base_scope(&all_parsed, &entity_sources);
-        let classifier = Self::compute_path_classifier(&all_parsed);
         let shallow = Arc::new(Self::compute_shallow(
             &base_scope,
             &all_parsed,
-            &classifier,
             intellisense,
             cache,
         ));
@@ -857,8 +967,7 @@ impl Snapshot {
             .iter()
             .flat_map(|m| shallow.rules_for(m))
             .collect();
-        let dep_graph = Self::compute_graph(&per_rule, &data_model_paths, &entity_sources);
-        let execution_order = Self::compute_execution_order(&dep_graph);
+        let mut dep_graph = Self::compute_graph(&per_rule, &data_model_paths, &entity_sources);
 
         let (_, pool_roots) = DataModelIr::classify_roots(
             subset
@@ -867,6 +976,8 @@ impl Snapshot {
         );
         let computed_instances = entity_graph.resolve_instance_targets(&dep_graph, &pool_roots);
         entity_graph.register_computed(&computed_instances);
+        dep_graph.link_instance_reads(&per_rule, &entity_graph, &entity_sources);
+        let execution_order = Self::compute_execution_order(&dep_graph);
 
         let mut data_models: Vec<DataModelEntry> = subset
             .iter()

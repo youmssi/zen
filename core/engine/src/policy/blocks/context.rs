@@ -8,13 +8,15 @@ use zen_expression::{Isolate, IsolateError};
 
 use super::property_read::ReadFlattener;
 use super::type_check::TypeCheck;
+use crate::analysis::nullable::{NullableOperand, OnError};
+use crate::analysis::table::{HitMode, VerifyInput, VerifyOutput, VerifyTable};
 use crate::policy::ir::PropertyPath;
-use crate::policy::queries::dependency::PathPrefix;
+use crate::policy::queries::dependency::{DataModelPaths, PathPrefix};
 use crate::policy::queries::scope::VariableTypeScope;
 use crate::workspace::db::AnalysisPass;
 use crate::workspace::types::{
-    CursorTarget, Diagnostic, DiagnosticCode, DiagnosticLocation, ExpressionKind, Severity,
-    WriteTrace,
+    CursorTarget, Diagnostic, DiagnosticArgs, DiagnosticCode, DiagnosticLocation, ExpressionKind,
+    Severity, WriteTrace,
 };
 
 pub type SharedIntelliSense = Rc<RefCell<IntelliSense>>;
@@ -59,6 +61,15 @@ pub struct ExecutionError {
 
 pub type SharedDictionaryTypes = Rc<ahash::HashMap<Arc<str>, VariableType>>;
 pub type SharedPoisonedPaths = Rc<RefCell<ahash::HashSet<Arc<str>>>>;
+pub type SharedDeclaredPaths = Rc<DataModelPaths>;
+
+#[derive(Debug, Clone)]
+pub struct TableCheck {
+    pub(crate) at: usize,
+    pub(crate) mode: HitMode,
+    pub(crate) inputs: Vec<VerifyInput>,
+    pub(crate) outputs: Vec<VerifyOutput>,
+}
 
 pub struct AnalysisContext {
     scope: VariableType,
@@ -67,13 +78,17 @@ pub struct AnalysisContext {
     reads: Vec<PropertyRead>,
     writes: Vec<WriteTarget>,
     diagnostics: Vec<Diagnostic>,
+    table_checks: Vec<TableCheck>,
     pass: AnalysisPass,
     intellisense: SharedIntelliSense,
     dictionary_types: SharedDictionaryTypes,
     poisoned_paths: SharedPoisonedPaths,
+    declared_paths: SharedDeclaredPaths,
+    default_target: Option<CursorTarget>,
 }
 
 impl AnalysisContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         scope: VariableType,
         policy_path: Arc<str>,
@@ -82,6 +97,7 @@ impl AnalysisContext {
         pass: AnalysisPass,
         dictionary_types: SharedDictionaryTypes,
         poisoned_paths: SharedPoisonedPaths,
+        declared_paths: SharedDeclaredPaths,
     ) -> Self {
         Self {
             scope,
@@ -90,10 +106,13 @@ impl AnalysisContext {
             reads: Vec::new(),
             writes: Vec::new(),
             diagnostics: Vec::new(),
+            table_checks: Vec::new(),
             pass,
             intellisense,
             dictionary_types,
             poisoned_paths,
+            declared_paths,
+            default_target: None,
         }
     }
 
@@ -103,6 +122,17 @@ impl AnalysisContext {
 
     pub(super) fn dictionary_types(&self) -> &ahash::HashMap<Arc<str>, VariableType> {
         &self.dictionary_types
+    }
+
+    pub fn with_target<R>(
+        &mut self,
+        target: Option<CursorTarget>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = std::mem::replace(&mut self.default_target, target);
+        let result = f(self);
+        self.default_target = previous;
+        result
     }
 
     pub fn analyze_standard(
@@ -131,7 +161,7 @@ impl AnalysisContext {
             ),
         };
         self.record_reads(&analysis, &expression_id);
-        self.absorb_diagnostics(&analysis, &expression_id);
+        self.absorb_diagnostics(&analysis, &expression_id, source, kind);
         analysis
     }
 
@@ -167,7 +197,7 @@ impl AnalysisContext {
             ),
         };
         self.record_reads(&analysis, &expression_id);
-        self.absorb_diagnostics(&analysis, &expression_id);
+        self.absorb_diagnostics(&analysis, &expression_id, source, ExpressionKind::Unary);
         analysis
     }
 
@@ -197,7 +227,9 @@ impl AnalysisContext {
             }
             self.poisoned_paths.borrow_mut().insert(path.clone());
         }
-        if matches!(self.pass, AnalysisPass::Enriched) {
+        if matches!(self.pass, AnalysisPass::Enriched)
+            && self.declared_paths.matches_prefix(&path).is_none()
+        {
             self.scope.insert_at_path(&path, &resolved_type, true);
         }
         self.writes.push(WriteTarget {
@@ -268,6 +300,33 @@ impl AnalysisContext {
             .push(Diagnostic::error(code, location, message));
     }
 
+    pub fn error_with_expr_code(
+        &mut self,
+        code: DiagnosticCode,
+        expr_code: &'static str,
+        args: DiagnosticArgs,
+        expression_id: Option<Arc<str>>,
+        span: Option<(u32, u32)>,
+        message: impl Into<String>,
+    ) {
+        let location = self.location_with(expression_id, span);
+        self.diagnostics
+            .push(Diagnostic::error(code, location, message).with_expr_code(expr_code, args));
+    }
+
+    pub(super) fn declares(&self, path: &str) -> bool {
+        self.declared_paths.declares(path)
+    }
+
+    pub(super) fn defer_table_check(&mut self, table: VerifyTable) {
+        self.table_checks.push(TableCheck {
+            at: self.diagnostics.len(),
+            mode: table.mode,
+            inputs: table.inputs,
+            outputs: table.outputs,
+        });
+    }
+
     pub fn hint_with_target(
         &mut self,
         code: DiagnosticCode,
@@ -294,7 +353,7 @@ impl AnalysisContext {
             block_id: Some(self.block_id.clone()),
             expression_id,
             span,
-            target: None,
+            target: self.default_target.clone(),
         }
     }
 
@@ -354,6 +413,7 @@ impl AnalysisContext {
             reads: self.reads,
             writes: self.writes,
             diagnostics: self.diagnostics,
+            table_checks: self.table_checks,
         }
     }
 
@@ -422,18 +482,28 @@ impl AnalysisContext {
         &mut self,
         analysis: &ExpressionAnalysis,
         expression_id: &Option<Arc<str>>,
+        source: &str,
+        kind: ExpressionKind,
     ) {
+        let first = self.diagnostics.len();
         for diag in &analysis.diagnostics {
             let location = DiagnosticLocation {
                 policy_path: self.policy_path.clone(),
                 block_id: Some(self.block_id.clone()),
                 expression_id: expression_id.clone(),
                 span: Some(diag.span),
-                target: None,
+                target: self.default_target.clone(),
             };
             self.diagnostics
                 .push(Diagnostic::from_expression(diag, location));
         }
+        NullableOperand::annotate(
+            &mut self.diagnostics[first..],
+            &mut self.intellisense.borrow_mut(),
+            source,
+            matches!(kind, ExpressionKind::Unary),
+            OnError::Raise,
+        );
     }
 }
 
@@ -442,6 +512,7 @@ pub struct AnalysisSummary {
     pub reads: Vec<PropertyRead>,
     pub writes: Vec<WriteTarget>,
     pub diagnostics: Vec<Diagnostic>,
+    pub table_checks: Vec<TableCheck>,
 }
 
 pub struct ExecutionContext<'a> {

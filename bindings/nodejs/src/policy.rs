@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use napi::anyhow::anyhow;
@@ -10,6 +11,12 @@ use zen_engine::policy::PolicyDocument;
 use zen_engine::workspace;
 
 type ResolverRef = FunctionRef<FnArgs<(String, Value)>, Option<String>>;
+
+#[napi(object)]
+pub struct PolicyChanges {
+    pub cursor: i64,
+    pub paths: Vec<String>,
+}
 
 #[napi(object)]
 pub struct PolicyExpressionCursor {
@@ -57,6 +64,8 @@ pub struct PolicyDiagnostic {
     pub expression_id: Option<String>,
     #[napi(ts_type = "PolicyCursorTarget")]
     pub target: Option<Value>,
+    pub expr_code: Option<String>,
+    pub args: Option<HashMap<String, String>>,
 }
 
 impl From<&workspace::Diagnostic> for PolicyDiagnostic {
@@ -80,6 +89,13 @@ impl From<&workspace::Diagnostic> for PolicyDiagnostic {
                 .target
                 .as_ref()
                 .and_then(|t| serde_json::to_value(t).ok()),
+            expr_code: d.expr_code.map(String::from),
+            args: (!d.args.is_empty()).then(|| {
+                d.args
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect()
+            }),
         }
     }
 }
@@ -280,6 +296,8 @@ pub struct PolicyInspectResult {
     #[napi(ts_type = "PolicyVariableType")]
     pub kind: Value,
     pub label: String,
+    pub detail: Option<String>,
+    pub info: Option<String>,
 }
 
 #[napi(object)]
@@ -296,6 +314,7 @@ pub struct PolicyCompletion {
     pub kind: String,
     pub detail: String,
     pub info: String,
+    pub follow: Option<String>,
 }
 
 #[napi(object)]
@@ -318,6 +337,13 @@ pub struct PolicyRenameRequest {
     #[napi(ts_type = "PolicyRenameTarget")]
     pub target: Value,
     pub new_name: String,
+    pub origin: Option<String>,
+}
+
+#[napi(object)]
+pub struct PolicyPathMove {
+    pub from: String,
+    pub to: String,
 }
 
 #[napi(object)]
@@ -406,7 +432,14 @@ fn variable_type_from_json(value: &Value) -> zen_expression::variable::VariableT
 }
 
 pub(crate) fn variable_type_to_json(vt: &zen_expression::variable::VariableType) -> Value {
-    use zen_expression::variable::VariableType;
+    variable_type_to_json_at(vt, &mut Vec::new())
+}
+
+fn variable_type_to_json_at(
+    vt: &zen_expression::variable::VariableType,
+    path: &mut Vec<*const ()>,
+) -> Value {
+    use zen_expression::variable::{VariableType, MAX_TYPE_DEPTH};
 
     match vt {
         VariableType::Any => serde_json::json!({ "type": "any" }),
@@ -427,14 +460,18 @@ pub(crate) fn variable_type_to_json(vt: &zen_expression::variable::VariableType)
         }
         VariableType::Array(inner) => serde_json::json!({
             "type": "array",
-            "items": variable_type_to_json(inner),
+            "items": variable_type_to_json_at(inner, path),
         }),
         VariableType::Object(obj) => {
-            let fields: serde_json::Map<std::string::String, Value> = obj
-                .borrow()
-                .iter()
-                .map(|(k, v)| (k.to_string(), variable_type_to_json(v)))
-                .collect();
+            let ptr = std::rc::Rc::as_ptr(obj) as *const ();
+            let mut fields = serde_json::Map::new();
+            if path.len() < MAX_TYPE_DEPTH && !path.contains(&ptr) {
+                path.push(ptr);
+                for (k, v) in obj.borrow().iter() {
+                    fields.insert(k.to_string(), variable_type_to_json_at(v, path));
+                }
+                path.pop();
+            }
             serde_json::json!({
                 "type": "object",
                 "fields": fields,
@@ -442,7 +479,7 @@ pub(crate) fn variable_type_to_json(vt: &zen_expression::variable::VariableType)
         }
         VariableType::Nullable(inner) => serde_json::json!({
             "type": "nullable",
-            "inner": variable_type_to_json(inner),
+            "inner": variable_type_to_json_at(inner, path),
         }),
     }
 }
@@ -491,7 +528,7 @@ pub struct PolicyFunctionResolutionRequest {
 
 #[napi]
 pub struct Workspace {
-    inner: workspace::Workspace,
+    pub(crate) inner: workspace::Workspace,
     resolver: Option<ResolverRef>,
 }
 
@@ -510,7 +547,7 @@ impl Workspace {
         }
     }
 
-    fn ensure_function_types(&self, env: &Env) -> napi::Result<()> {
+    pub(crate) fn ensure_function_types(&self, env: &Env) -> napi::Result<()> {
         let Some(resolver) = &self.resolver else {
             return Ok(());
         };
@@ -599,6 +636,15 @@ impl Workspace {
             .into_iter()
             .map(|p| p.to_string())
             .collect()
+    }
+
+    #[napi]
+    pub fn changes_since(&self, cursor: i64) -> PolicyChanges {
+        let (next, paths) = self.inner.changes_since(cursor.max(0) as u64);
+        PolicyChanges {
+            cursor: next as i64,
+            paths: paths.into_iter().map(|p| p.to_string()).collect(),
+        }
     }
 
     #[napi]
@@ -788,62 +834,9 @@ impl Workspace {
                 span: vec![result.span.0, result.span.1],
                 kind: variable_type_to_json(&result.kind),
                 label: result.label,
+                detail: result.detail,
+                info: result.info,
             }))
-    }
-
-    #[napi(ts_return_type = "PolicyNlExpression[]")]
-    pub fn nl(&self, env: Env, policy_path: String) -> napi::Result<Vec<Value>> {
-        self.ensure_function_types(&env)?;
-        self.inner
-            .nl(&policy_path)
-            .iter()
-            .map(|e| {
-                let mut value = serde_json::to_value(&e.result)
-                    .map_err(|err| napi::Error::from_reason(err.to_string()))?;
-                let obj = value
-                    .as_object_mut()
-                    .ok_or_else(|| napi::Error::from_reason("nl result is not an object"))?;
-                obj.remove("id");
-                obj.insert("blockId".into(), Value::String(e.block_id.to_string()));
-                obj.insert(
-                    "kind".into(),
-                    serde_json::to_value(e.kind)
-                        .map_err(|err| napi::Error::from_reason(err.to_string()))?,
-                );
-                obj.insert(
-                    "target".into(),
-                    serde_json::to_value(&e.target)
-                        .map_err(|err| napi::Error::from_reason(err.to_string()))?,
-                );
-                obj.insert("source".into(), Value::String(e.source.clone()));
-                if let Some(subject) = &e.result.subject_type {
-                    obj.insert("subjectType".into(), variable_type_to_json(subject));
-                }
-                Ok(value)
-            })
-            .collect()
-    }
-
-    #[napi(ts_return_type = "NlResult | null")]
-    pub fn nl_tokenize(
-        &self,
-        env: Env,
-        cursor: PolicyExpressionCursor,
-        text: String,
-    ) -> napi::Result<Option<Value>> {
-        self.ensure_function_types(&env)?;
-        let cursor: workspace::Cursor = cursor.try_into()?;
-        self.inner
-            .nl_tokenize(&cursor, &text)
-            .map(|result| {
-                let mut value = serde_json::to_value(&result)
-                    .map_err(|err| napi::Error::from_reason(err.to_string()))?;
-                if let (Some(subject), Some(obj)) = (&result.subject_type, value.as_object_mut()) {
-                    obj.insert("subjectType".into(), variable_type_to_json(subject));
-                }
-                Ok(value)
-            })
-            .transpose()
     }
 
     #[napi]
@@ -866,6 +859,7 @@ impl Workspace {
                     .unwrap_or_default(),
                 detail: c.detail,
                 info: c.info,
+                follow: c.follow.map(String::from),
             })
             .collect())
     }
@@ -894,20 +888,38 @@ impl Workspace {
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(self
             .inner
-            .rename(&target, &req.new_name)
+            .rename_from(&target, &req.new_name, req.origin.as_deref())
             .into_iter()
             .map(|e| serde_json::to_value(e).expect("EngineEdit serializes"))
             .collect())
     }
 
+    #[napi(ts_return_type = "PolicyPathEdit[]")]
+    pub fn move_paths(&self, moves: Vec<PolicyPathMove>) -> Vec<Value> {
+        let moves: Vec<(Arc<str>, Arc<str>)> = moves
+            .into_iter()
+            .map(|m| (Arc::from(m.from), Arc::from(m.to)))
+            .collect();
+        self.inner
+            .move_paths(&moves)
+            .into_iter()
+            .map(|e| serde_json::to_value(e).expect("PathEdit serializes"))
+            .collect()
+    }
+
     #[napi(ts_return_type = "PolicyReferenceSite[]")]
-    pub fn references(&self, env: Env, target: Value) -> napi::Result<Vec<Value>> {
+    pub fn references(
+        &self,
+        env: Env,
+        target: Value,
+        origin: Option<String>,
+    ) -> napi::Result<Vec<Value>> {
         self.ensure_function_types(&env)?;
         let target: workspace::RenameTarget =
             serde_json::from_value(target).map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(self
             .inner
-            .references(&target)
+            .references_from(&target, origin.as_deref())
             .into_iter()
             .map(|s| serde_json::to_value(s).expect("ReferenceSite serializes"))
             .collect())
