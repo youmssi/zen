@@ -6,6 +6,9 @@ pub struct ZenConfig {
     pub nodes_in_context: AtomicBool,
     pub function_timeout_millis: AtomicU64,
     pub http_auth: AtomicBool,
+    /// Whether function nodes may make HTTP requests themselves. When false, the `http` module
+    /// only reaches a host-provided handler, and fails without one.
+    pub http_native: AtomicBool,
 }
 
 impl Default for ZenConfig {
@@ -14,6 +17,7 @@ impl Default for ZenConfig {
             nodes_in_context: AtomicBool::new(true),
             function_timeout_millis: AtomicU64::new(5_000),
             http_auth: AtomicBool::new(true),
+            http_native: AtomicBool::new(true),
         }
     }
 }

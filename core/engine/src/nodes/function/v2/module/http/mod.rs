@@ -34,6 +34,16 @@ async fn execute_http<'js>(
 
     #[cfg(not(target_family = "wasm"))]
     {
+        if !crate::ZEN_CONFIG
+            .http_native
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(rquickjs::Exception::throw_message(
+                &ctx,
+                "HTTP requests from function nodes are disabled",
+            ));
+        }
+
         let backend = crate::nodes::function::v2::module::http::backend::native::NativeHttpBackend;
         return backend.execute_http(ctx, method, url, request).await;
     }
